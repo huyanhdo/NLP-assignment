@@ -4,8 +4,9 @@ from tqdm import tqdm
 
 
 from peft import LoraConfig, get_peft_model
-from transformers import AutoConfig, AutoTokenizer
 
+from transformers import AutoConfig, AutoTokenizer, DataCollatorForSeq2Seq, AutoModelForCausalLM
+from torch.utils.data import DataLoader, DistributedSampler, SequentialSampler
 from contextlib import nullcontext
 
 from lora_model import LoraModelForCasualLM
@@ -145,14 +146,18 @@ class Trainer:
         # Depending on whether the training is distributed (is_ddp_training), 
         # use 'DistributedSampler' for 'sampler' argument, else use 'None'.
         # Use 'DataCollatorForSeq2Seq' for 'collate_fn', passing 'tokenizer', padding settings, and return_tensors="pt".
-        
-        data_trainloader = None ### YOUR CODE HERE ###
+        if self.is_ddp_training:
+            data_trainloader = DataLoader(train_dataset,batch_size=self.batch_size,sampler = DistributedSampler,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
+        else:
+            data_trainloader = DataLoader(train_dataset,batch_size=self.batch_size,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
+ 
+        # data_trainloader = None ### YOUR CODE HERE ###
 
         # TODO: Prepare the evaluation DataLoader. Initialize 'DataLoader' with 'eval_dataset', 
         # the appropriate 'batch_size', and 'SequentialSampler' for 'sampler'.
         # Use 'DataCollatorForSeq2Seq' for 'collate_fn', passing 'tokenizer', padding settings, and return_tensors type.
-        
-        data_testloader = None ### YOUR CODE HERE ###
+        data_testloader = DataLoader(eval_dataset,batch_size=self.batch_size,sampler = SequentialSampler ,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
+        # data_testloader = None ### YOUR CODE HERE ###
         
         return data_trainloader, data_testloader
     
@@ -240,15 +245,15 @@ def _is_master_process():
 def load_pretrained_model(local_rank):
     # TODO: Load a pretrained AutoModelForCausalLM from the 'model_path' in float16 data type. 
     # Make sure to set 'device_map' to '{"": torch.device(f"cuda:{local_rank}")}' for DDP training.
-
-    model = None ### YOUR CODE HERE ###
+    model = AutoModelForCausalLM.from_pretrained(model_path)
+    # model = None ### YOUR CODE HERE ###
 
     # TODO: Create a LoraConfig with the parameters: r=8, lora_alpha=16, 
     # lora_dropout=0.05, bias="none", task_type="CAUSAL_LM".
     # We will then use the config to initialize a LoraModelForCasualLM with the loaded model. 
     # Then, print the trainable parameters of the model.
-
-    lora_config = None ### YOUR CODE HERE ###
+    lora_config = LoraConfig(task_type='CAUSAL_LM', r=8, lora_alpha=16, lora_dropout=0.05,bias ='none')
+    # lora_config = None ### YOUR CODE HERE ###
 
     # Create LoRA model
     model = LoraModelForCasualLM(model, lora_config)
@@ -265,12 +270,12 @@ if __name__ == "__main__":
 
     backend = "nccl"
     model_path = 'bigscience/bloom-1b7'
-    if os.environ.get("DEBUG"):
-        data_path = "test_data.json"
-    else:
-        data_path = 'alpaca_data.json'
-        download_from_driver(path= DRIVER_DATA_PATH, location_path= data_path)
-
+    # if os.environ.get("DEBUG"):
+    #     data_path = "test_data.json"
+    # else:
+    #     data_path = 'alpaca_data.json'
+    #     download_from_driver(path= DRIVER_DATA_PATH, location_path= data_path)
+    data_path = 'test_data.json'
     size_valid_set = 0.1
     max_length = 512
     num_epochs = 10
