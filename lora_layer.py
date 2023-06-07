@@ -66,7 +66,7 @@ class LoraLayer:
         # Moves the layer to the same device as the weight tensor
         self.to(self.weight.device)
 
-     # Method to update the parameters of the embedding layer with a new adapter
+    # Method to update the parameters of the embedding layer with a new adapter
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         # Updates the rank and scaling factor for the adapter
         self.r[adapter_name] = r
@@ -259,7 +259,7 @@ class Linear(nn.Linear, LoraLayer):
             # TODO: Merge the LoRA parameters by adding the product of lora_B weights and lora_A weights (after transposing 
             # if necessary) to the original weights, scaled by the LoRA scaling factor. After this operation, set the merged
             # flag to True.
-           
+        
             self.weight.data += (
                 transpose(
                     self.lora_B[self.active_adapter] @ self.lora_A[self.active_adapter], True
@@ -302,8 +302,9 @@ class Linear(nn.Linear, LoraLayer):
             # passing the input through lora_A, applying dropout, then passing it through lora_B. The output is scaled by the
             # LoRA scaling factor and added to the result.
             if self.r[self.active_adapter] > 0:
-                after_A = F.linear(x,self.lora_A[self.active_adapter].T)
-            result += (after_A @ self.lora_embedding_B[self.active_adapter].T) * self.scaling[self.active_adapter]
+                after_A = self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                after_B = self.lora_B[self.active_adapter](after_A)
+            result += after_B * self.scaling[self.active_adapter]
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         

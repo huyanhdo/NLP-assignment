@@ -56,7 +56,7 @@ class Trainer:
         self.gradient_accumulation_steps = gradient_accumulation_steps
 
         # move model to device
-        model.to(f"cuda:{self.gpu_id}")
+        model = model.to(f"cuda:{self.gpu_id}")
 
         # TODO: Setup mixed precision training context. If 'mixed_precision_dtype' is None, use 'nullcontext', 
         # otherwise use 'torch.amp.autocast' with the specified dtype.
@@ -145,9 +145,9 @@ class Trainer:
         # and the appropriate 'batch_size'.
         # Depending on whether the training is distributed (is_ddp_training), 
         # use 'DistributedSampler' for 'sampler' argument, else use 'None'.
-        # Use 'DataCollatorForSeq2Seq' for 'collate_fn', passing 'tokenizer', padding settings, and return_tensors="pt".
+        # Use 'DataCollatorForSeq2Seq' for 'collate_fn', patoooo
         if self.is_ddp_training:
-            data_trainloader = DataLoader(train_dataset,batch_size=self.batch_size,sampler = DistributedSampler,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
+            data_trainloader = DataLoader(train_dataset,batch_size=self.batch_size,sampler = DistributedSampler(train_dataset),collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
         else:
             data_trainloader = DataLoader(train_dataset,batch_size=self.batch_size,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
  
@@ -156,7 +156,7 @@ class Trainer:
         # TODO: Prepare the evaluation DataLoader. Initialize 'DataLoader' with 'eval_dataset', 
         # the appropriate 'batch_size', and 'SequentialSampler' for 'sampler'.
         # Use 'DataCollatorForSeq2Seq' for 'collate_fn', passing 'tokenizer', padding settings, and return_tensors type.
-        data_testloader = DataLoader(eval_dataset,batch_size=self.batch_size,sampler = SequentialSampler ,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
+        data_testloader = DataLoader(eval_dataset,batch_size=self.batch_size,sampler = SequentialSampler(eval_dataset) ,collate_fn=DataCollatorForSeq2Seq(tokenizer=self.tokenizer,padding=True,return_tensors='pt'))
         # data_testloader = None ### YOUR CODE HERE ###
         
         return data_trainloader, data_testloader
@@ -170,8 +170,11 @@ class Trainer:
             eval_progress_bar = eval_dataloader
         
         for batch in eval_progress_bar:
+            batch = {key: value.to(self.gpu_id) for key, value in batch.items()}
             with self.ctx:
                 with torch.no_grad():
+                    for i in batch.values():
+                        print(i.device)
                     outputs = self.model(**batch) 
             avg_loss += outputs.loss.item()
         avg_loss = avg_loss/(len(eval_dataloader))
@@ -245,7 +248,9 @@ def _is_master_process():
 def load_pretrained_model(local_rank):
     # TODO: Load a pretrained AutoModelForCausalLM from the 'model_path' in float16 data type. 
     # Make sure to set 'device_map' to '{"": torch.device(f"cuda:{local_rank}")}' for DDP training.
-    model = AutoModelForCausalLM.from_pretrained(model_path)
+    model = AutoModelForCausalLM.from_pretrained(model_path,
+                                                # load_in_8bit=load_8bit,
+                                                torch_dtype=torch.float16)
     # model = None ### YOUR CODE HERE ###
 
     # TODO: Create a LoraConfig with the parameters: r=8, lora_alpha=16, 
