@@ -61,7 +61,10 @@ class Trainer:
         # TODO: Setup mixed precision training context. If 'mixed_precision_dtype' is None, use 'nullcontext', 
         # otherwise use 'torch.amp.autocast' with the specified dtype.
         mixed_precision_dtype = None ### YOUR CODE HERE ###
-        self.ctx = nullcontext() ### YOUR CODE HERE ###
+        if mixed_precision_dtype == None:
+            self.ctx = nullcontext() ### YOUR CODE HERE ###
+        else:
+            self.ctx = torch.amp.autocast()
         
 
     def _set_ddp_training(self):
@@ -173,8 +176,6 @@ class Trainer:
             batch = {key: value.to(self.gpu_id) for key, value in batch.items()}
             with self.ctx:
                 with torch.no_grad():
-                    for i in batch.values():
-                        print(i.device)
                     outputs = self.model(**batch) 
             avg_loss += outputs.loss.item()
         avg_loss = avg_loss/(len(eval_dataloader))
@@ -275,12 +276,12 @@ if __name__ == "__main__":
 
     backend = "nccl"
     model_path = 'bigscience/bloom-1b7'
-    # if os.environ.get("DEBUG"):
-    #     data_path = "test_data.json"
-    # else:
-    #     data_path = 'alpaca_data.json'
-    #     download_from_driver(path= DRIVER_DATA_PATH, location_path= data_path)
-    data_path = 'test_data.json'
+    if os.environ.get("DEBUG"):
+        data_path = "test_data.json"
+    else:
+        data_path = 'alpaca_data.json'
+        download_from_driver(path= DRIVER_DATA_PATH, location_path= data_path)
+    
     size_valid_set = 0.1
     max_length = 512
     num_epochs = 10
