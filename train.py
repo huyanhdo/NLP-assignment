@@ -12,8 +12,9 @@ from contextlib import nullcontext
 from lora_model import LoraModelForCasualLM
 from utils.common import download_from_driver
 from prepare_data import create_datasets
-from torch.distributed import  destroy_process_group
-
+from torch.distributed import  destroy_process_group,init_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.cuda.amp import GradScaler, autocast
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -60,18 +61,19 @@ class Trainer:
 
         # TODO: Setup mixed precision training context. If 'mixed_precision_dtype' is None, use 'nullcontext', 
         # otherwise use 'torch.amp.autocast' with the specified dtype.
-        mixed_precision_dtype = None ### YOUR CODE HERE ###
+        mixed_precision_dtype = True ### YOUR CODE HERE ###
         if mixed_precision_dtype == None:
             self.ctx = nullcontext() ### YOUR CODE HERE ###
         else:
-            self.ctx = torch.amp.autocast()
+            self.ctx = autocast()
+            self.scaler = GradScaler()
         
 
     def _set_ddp_training(self):
         # TODO: Initialize the DistributedDataParallel wrapper for the model. 
         # You would need to pass the model and specify the device IDs
         # and output device for the data parallelism.
-        self.model = None ### YOUR CODE HERE ###
+        self.model = DDP(self.model,device_ids=[self.gpu_id],output_device=self.gpu_id) ### YOUR CODE HERE ###
 
         
     def _run_batch(self, batch):
@@ -86,9 +88,13 @@ class Trainer:
         """
         
         with self.ctx:
-            outputs = self.model(**batch) 
+            outputs = self.model(**batch)
             loss = outputs.loss / self.gradient_accumulation_steps  # Normalize loss
-        loss.backward()
+        if isinstance(self.ctx,autocast):
+            self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+            
         return loss.item()
 
     def _run_epoch(self, train_dataloader, epoch):
@@ -124,7 +130,11 @@ class Trainer:
 
             # Perform optimizer step and reset gradients after accumulating enough gradients
             if steps % self.gradient_accumulation_steps == 0:
-                self.optimizer.step()
+                if isinstance(self.ctx,autocast):
+                    self.scaler.step((self.optimizer))
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
                 self.optimizer.zero_grad()
                 torch.cuda.empty_cache()
         epoch_loss /= (len(train_dataloader) / self.gradient_accumulation_steps)
@@ -251,7 +261,8 @@ def load_pretrained_model(local_rank):
     # Make sure to set 'device_map' to '{"": torch.device(f"cuda:{local_rank}")}' for DDP training.
     model = AutoModelForCausalLM.from_pretrained(model_path,
                                                 # load_in_8bit=load_8bit,
-                                                torch_dtype=torch.float16)
+                                                torch_dtype=torch.float16,
+                                                device_map = {"": torch.device(f"cuda:{local_rank}")})
     # model = None ### YOUR CODE HERE ###
 
     # TODO: Create a LoraConfig with the parameters: r=8, lora_alpha=16, 
@@ -303,9 +314,9 @@ if __name__ == "__main__":
     if distributed_strategy  == "ddp":
         # TODO: Initialize the process group for distributed data parallelism with nccl backend.
         # After that, you should set the 'local_rank' from the environment variable 'LOCAL_RANK'.
-        
+        init_process_group(backend)
         # Initialize the process group ### YOUR CODE HERE ###
-        local_rank = None ### YOUR CODE HERE ###
+        local_rank = int(os.environ['RANK']) ### YOUR CODE HERE ###
     else:
         os.environ['RANK'] = '0'
         local_rank = 0
